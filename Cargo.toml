@@ -1,0 +1,16 @@
+[package]
+name = "futures-delay-queue"
+version = "0.1.0"
+authors = ["spebern sp33cht@gmail.com"]
+edition = "2018"
+license = "Apache-2.0/MIT"
+repository = "https://github.com/spebern/futures-delay-queue"
+documentation = "https://docs.rs/futures-delay-queue"
+description = "Async delay queue backed by async-std and futures-timer"
+keywords = ["async", "await", "future", "delay", "queue"]
+categories = ["asynchronous", "concurrency", "network-programming"]
+readme = "README.md"
+
+[dependencies]
+futures-intrusive = "0.2.2"
+async-std = { version = "1.2.0", features = ["unstable", "attributes"] }
