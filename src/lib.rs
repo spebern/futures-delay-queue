@@ -1,4 +1,4 @@
-//! A queue of delayed elements running backed by [async-std](https://github.com/async-rs/async-std) `async-std` and [futures-timer](https://github.com/async-rs/futures-timer).
+//! A queue of delayed elements running backed by [async-std](https://github.com/async-rs/async-std) and [futures-timer](https://github.com/async-rs/futures-timer).
 //!
 //! Once an element is inserted into the `DelayQueue`, it is yielded once the
 //! specified deadline has been reached.
