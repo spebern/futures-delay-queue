@@ -7,7 +7,7 @@
 //!
 //! # Implementation
 //!
-//! The delays are spawned and a timeout races against a oneshot channel that can is
+//! The delays are spawned and a timeout races against a oneshot channel that can be
 //! triggered with the [`DelayHandle`]. If the timeout occurs before cancelation the
 //! item is yielded through the receiver channel.
 //!
