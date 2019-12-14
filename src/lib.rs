@@ -18,7 +18,7 @@
 //! returned. The delay handle is used to remove the entry.
 //!
 //! The delays can be configured with the [`reset_at` or the [`reset`] method or canceled by
-//! dropping the handle.
+//! calling the [`cancel`] method. Dropping the handle will not cancel the delay.
 //!
 //! # Example
 //!
@@ -33,7 +33,7 @@
 //!     let d1 = dq.insert(1, Duration::from_secs(2));
 //!     d1.reset(Duration::from_secs(4)).await;
 //!     let d2 = dq.insert(2, Duration::from_secs(1));
-//!     drop(d2);
+//!     d2.cancel().await;
 //!     let d3 = dq.insert(3, Duration::from_secs(3));
 //!
 //!     assert_eq!(rx.recv().await, Some(3));
@@ -81,7 +81,12 @@ pub struct DelayQueue<T: 'static> {
 #[derive(Debug)]
 pub struct DelayHandle {
     // Used to change the delay.
-    reset: Sender<Duration>,
+    reset: Sender<DelayReset>,
+}
+
+enum DelayReset {
+    NewDuration(Duration),
+    Cancel,
 }
 
 impl DelayHandle {
@@ -94,13 +99,18 @@ impl DelayHandle {
         } else {
             when - now
         };
-        self.reset.send(dur).await;
+        self.reset(dur).await;
     }
 
     /// Resets the delay of the corresponding item to now + `dur` and returns a new `DelayHandle`on
     /// success.
     pub async fn reset(&self, dur: Duration) {
-        self.reset.send(dur).await;
+        self.reset.send(DelayReset::NewDuration(dur)).await;
+    }
+
+    /// Cancels the delay.
+    pub async fn cancel(self) {
+        self.reset.send(DelayReset::Cancel).await;
     }
 }
 
@@ -122,7 +132,8 @@ pin_project! {
         #[pin]
         delay: Delay,
         #[pin]
-        reset: Receiver<Duration>,
+        reset: Receiver<DelayReset>,
+        handle_dropped: bool,
     }
 }
 
@@ -131,14 +142,17 @@ impl<T> Future for DelayedItem<T> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
-        // check if we got a reset or got cancled
-        if let Poll::Ready(v) = this.reset.poll_next(cx) {
-            match v {
-                Some(dur) => {
-                    *this.delay = Delay::new(dur);
+        if !*this.handle_dropped {
+            // check if we got a reset or got cancled
+            if let Poll::Ready(v) = this.reset.poll_next(cx) {
+                match v {
+                    Some(reset) => match reset {
+                        DelayReset::Cancel => return Poll::Ready(None),
+                        DelayReset::NewDuration(dur) => *this.delay = Delay::new(dur),
+                    },
+                    // cancel
+                    None => *this.handle_dropped = true,
                 }
-                // cancel
-                None => return Poll::Ready(None),
             }
         }
 
@@ -174,6 +188,7 @@ impl<T: 'static + Send> DelayQueue<T> {
             value: Some(value),
             delay: Delay::new(dur),
             reset: reset_rx,
+            handle_dropped: false,
         };
         task::spawn(async move {
             if let Some(v) = delayed_item.await {
