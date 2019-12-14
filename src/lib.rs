@@ -7,9 +7,9 @@
 //!
 //! # Implementation
 //!
-//! The delays are spawned and a timeout races against a oneshot channel that can be
-//! triggered with the [`DelayHandle`]. If the timeout occurs before cancelation the
-//! item is yielded through the receiver channel.
+//! The delays are spawned and a timeout races against a reset channel that can be
+//! triggered with the [`DelayHandle`]. If the timeout occurs before cancelation
+//! or a reset the item is yielded through the receiver channel.
 //!
 //! # Usage
 //!
@@ -17,7 +17,8 @@
 //! [`insert_at`] methods. A deadline is provided with the item and a [`DelayHandle`] is
 //! returned. The delay handle is used to remove the entry.
 //!
-//! The delays can be canceled by calling the [`cancel`] method on the [`DelayHandle`].
+//! The delays can be configured with the [`reset_at` or the [`reset`] method or canceled by
+//! dropping the handle.
 //!
 //! # Example
 //!
@@ -29,13 +30,14 @@
 //! async fn main() {
 //!     let (dq, rx) = delay_queue::<i32>(3);
 //!
-//!     let _ = dq.insert(1, Duration::from_secs(2));
-//!     let d = dq.insert(2, Duration::from_secs(1));
-//!     d.cancel();
-//!     let _ = dq.insert(3, Duration::from_secs(3));
+//!     let d1 = dq.insert(1, Duration::from_secs(2));
+//!     d1.reset(Duration::from_secs(4)).await;
+//!     let d2 = dq.insert(2, Duration::from_secs(1));
+//!     drop(d2);
+//!     let d3 = dq.insert(3, Duration::from_secs(3));
 //!
-//!     assert_eq!(rx.recv().await, Some(1));
 //!     assert_eq!(rx.recv().await, Some(3));
+//!     assert_eq!(rx.recv().await, Some(1));
 //!
 //!     drop(dq);
 //!     assert_eq!(rx.recv().await, None);
@@ -47,22 +49,30 @@
 //! [`cancel`]: #method.cancel
 //! [`DelayHandle`]: struct.DelayHandle.html
 
+/*
 #![cfg_attr(feature = "docs", feature(doc_cfg))]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![doc(test(attr(deny(rust_2018_idioms, warnings))))]
 #![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
+*/
 
 use async_std::{
-    future::{self, TimeoutError},
-    sync::{channel, Arc, Receiver, Sender},
+    stream::Stream,
+    sync::{channel, Receiver, Sender},
     task,
 };
-use futures_intrusive::channel::OneshotChannel;
-use std::time::{Duration, Instant};
+use futures_timer::Delay;
+use pin_project_lite::pin_project;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 /// A queue for managing delayed items.
 #[derive(Debug)]
-pub struct DelayQueue<T> {
+pub struct DelayQueue<T: 'static> {
     // Used to send the expired items.
     expired: Sender<T>,
 }
@@ -70,16 +80,27 @@ pub struct DelayQueue<T> {
 /// A handle to cancel the corresponding delay of an item in `DelayQueue`.
 #[derive(Debug)]
 pub struct DelayHandle {
-    /// Used to cancel the delay.
-    cancel: Arc<OneshotChannel<()>>,
+    // Used to change the delay.
+    reset: Sender<Duration>,
 }
 
 impl DelayHandle {
-    /// Cancels the delay of the corresponding delayed item.
-    pub fn cancel(self) {
-        // Send error can only occur if the channel was closed, which happens
-        // when the item already expired.
-        let _ = self.cancel.send(());
+    /// Resets the delay of the corresponding item to `when` and returns a new `DelayHandle` on
+    /// success.
+    pub async fn reset_at(&self, when: Instant) {
+        let now = Instant::now();
+        let dur = if when <= now {
+            Duration::from_nanos(0)
+        } else {
+            when - now
+        };
+        self.reset.send(dur).await;
+    }
+
+    /// Resets the delay of the corresponding item to now + `dur` and returns a new `DelayHandle`on
+    /// success.
+    pub async fn reset(&self, dur: Duration) {
+        self.reset.send(dur).await;
     }
 }
 
@@ -95,34 +116,70 @@ pub fn delay_queue<T: 'static + Send>(cap: usize) -> (DelayQueue<T>, Receiver<T>
     (DelayQueue { expired: tx }, rx)
 }
 
+pin_project! {
+    struct DelayedItem<T> {
+        value: Option<T>,
+        #[pin]
+        delay: Delay,
+        #[pin]
+        reset: Receiver<Duration>,
+    }
+}
+
+impl<T> Future for DelayedItem<T> {
+    type Output = Option<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        // check if we got a reset or got cancled
+        if let Poll::Ready(v) = this.reset.poll_next(cx) {
+            match v {
+                Some(dur) => {
+                    *this.delay = Delay::new(dur);
+                }
+                // cancel
+                None => return Poll::Ready(None),
+            }
+        }
+
+        // expired?
+        match this.delay.poll(cx) {
+            Poll::Ready(_) => Poll::Ready(this.value.take()),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 impl<T: 'static + Send> DelayQueue<T> {
-    /// Inserts an item into the delay queue that will be yielded after `timeout` has passed.
-    pub fn insert(&self, value: T, timeout: Duration) -> DelayHandle {
-        self.new_handle_with_future(value, timeout)
+    /// Inserts an item into the delay queue that will be yielded after `dur` has passed.
+    pub fn insert(&self, value: T, dur: Duration) -> DelayHandle {
+        self.new_handle_with_future(value, dur)
     }
 
     /// Inserts an item into the delay queue that will be yielded at `when`.
     pub fn insert_at(&self, value: T, when: Instant) -> DelayHandle {
         let now = Instant::now();
-        let timeout = if now >= when {
+        let dur = if now >= when {
             Duration::from_nanos(0)
         } else {
             when - now
         };
-        self.new_handle_with_future(value, timeout)
+        self.new_handle_with_future(value, dur)
     }
 
-    fn new_handle_with_future(&self, value: T, timeout: Duration) -> DelayHandle {
-        let delay_handle = DelayHandle {
-            cancel: Arc::new(OneshotChannel::new()),
-        };
-        let cancel = delay_handle.cancel.clone();
+    fn new_handle_with_future(&self, value: T, dur: Duration) -> DelayHandle {
+        let (reset_tx, reset_rx) = channel(1);
         let expired = self.expired.clone();
+        let delayed_item = DelayedItem {
+            value: Some(value),
+            delay: Delay::new(dur),
+            reset: reset_rx,
+        };
         task::spawn(async move {
-            if let Err(TimeoutError { .. }) = future::timeout(timeout, cancel.receive()).await {
-                expired.send(value).await;
+            if let Some(v) = delayed_item.await {
+                expired.send(v).await;
             }
         });
-        delay_handle
+        DelayHandle { reset: reset_tx }
     }
 }
