@@ -1,4 +1,4 @@
-# Aynchronous delay queue
+# Asynchronous delay queue
 
 <!-- cargo-sync-readme start -->
 
