@@ -30,11 +30,11 @@
 //! async fn main() {
 //!     let (delay_queue, rx) = delay_queue::<i32>(3);
 //!
-//!     let delay_handle = delay_queue.insert(1, Duration::from_millis(2));
-//!     delay_handle.reset(Duration::from_millis(4)).await;
-//!     let delay_handle = delay_queue.insert(2, Duration::from_millis(1));
+//!     let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
+//!     delay_handle.reset(Duration::from_millis(40)).await;
+//!     let delay_handle = delay_queue.insert(2, Duration::from_millis(10));
 //!     delay_handle.cancel().await;
-//!     let delay_handle = delay_queue.insert(3, Duration::from_millis(3));
+//!     let delay_handle = delay_queue.insert(3, Duration::from_millis(30));
 //!
 //!     assert_eq!(rx.recv().await, Some(3));
 //!     assert_eq!(rx.recv().await, Some(1));
