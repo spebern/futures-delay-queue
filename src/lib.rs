@@ -28,18 +28,18 @@
 //!
 //! #[async_std::main]
 //! async fn main() {
-//!     let (dq, rx) = delay_queue::<i32>(3);
+//!     let (delay_queue, rx) = delay_queue::<i32>(3);
 //!
-//!     let d1 = dq.insert(1, Duration::from_secs(2));
-//!     d1.reset(Duration::from_secs(4)).await;
-//!     let d2 = dq.insert(2, Duration::from_secs(1));
-//!     d2.cancel().await;
-//!     let d3 = dq.insert(3, Duration::from_secs(3));
+//!     let delay_handle = delay_queue.insert(1, Duration::from_millis(2));
+//!     delay_handle.reset(Duration::from_millis(4)).await;
+//!     let delay_handle = delay_queue.insert(2, Duration::from_millis(1));
+//!     delay_handle.cancel().await;
+//!     let delay_handle = delay_queue.insert(3, Duration::from_millis(3));
 //!
 //!     assert_eq!(rx.recv().await, Some(3));
 //!     assert_eq!(rx.recv().await, Some(1));
 //!
-//!     drop(dq);
+//!     drop(delay_queue);
 //!     assert_eq!(rx.recv().await, None);
 //! }
 //! ```
@@ -148,7 +148,7 @@ impl<T> Future for DelayedItem<T> {
                         DelayReset::Cancel => return Poll::Ready(None),
                         DelayReset::NewDuration(dur) => *this.delay = Delay::new(dur),
                     },
-                    // cancel
+                    // handle got dropped, from now on we wait until the item expires
                     None => *this.handle_dropped = true,
                 }
             }
