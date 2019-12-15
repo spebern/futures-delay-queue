@@ -196,3 +196,51 @@ impl<T: 'static + Send> DelayQueue<T> {
         DelayHandle { reset: reset_tx }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_std::future::timeout;
+
+    #[async_std::test]
+    async fn insert() {
+        let (delay_queue, rx) = delay_queue::<i32>(3);
+        delay_queue.insert(1, Duration::from_millis(10));
+        delay_queue.insert(2, Duration::from_millis(5));
+        assert_eq!(
+            timeout(Duration::from_millis(8), rx.recv()).await,
+            Ok(Some(2))
+        );
+        assert_eq!(
+            timeout(Duration::from_millis(7), rx.recv()).await,
+            Ok(Some(1))
+        );
+    }
+
+    #[async_std::test]
+    async fn reset() {
+        let (delay_queue, rx) = delay_queue::<i32>(3);
+        let delay_handle = delay_queue.insert(1, Duration::from_millis(100));
+        delay_handle.reset(Duration::from_millis(20)).await;
+        assert_eq!(
+            timeout(Duration::from_millis(40), rx.recv()).await,
+            Ok(Some(1))
+        );
+
+        let delay_handle = delay_queue.insert(2, Duration::from_millis(100));
+        delay_handle.reset_at(Instant::now() + Duration::from_millis(20)).await;
+        assert_eq!(
+            timeout(Duration::from_millis(40), rx.recv()).await,
+            Ok(Some(2))
+        );
+    }
+
+    #[async_std::test]
+    async fn cancel() {
+        let (dq, rx) = delay_queue::<i32>(3);
+        let delay_handle = dq.insert(1, Duration::from_millis(20));
+        delay_handle.cancel().await;
+        assert!(timeout(Duration::from_millis(40), rx.recv()).await.is_err());
+    }
+}
+
