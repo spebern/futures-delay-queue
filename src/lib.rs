@@ -237,8 +237,8 @@ mod tests {
 
     #[async_std::test]
     async fn cancel() {
-        let (dq, rx) = delay_queue::<i32>(3);
-        let delay_handle = dq.insert(1, Duration::from_millis(20));
+        let (delay_queue, rx) = delay_queue::<i32>(3);
+        let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
         delay_handle.cancel().await;
         assert!(timeout(Duration::from_millis(40), rx.recv()).await.is_err());
     }
