@@ -1,8 +1,8 @@
-//! A queue of delayed elements running backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
+//! A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
 //! - [async-std](https://crates.io/crates/async-std) as default, and
 //! - [tokio](https://crates.io/crates/tokio) with feature "use-tokio"
 //!
-//! Once an element is inserted into the [`DelayQueue`], it is yielded once the
+//! An element is inserted into the [`DelayQueue`] and will be yielded once the
 //! specified deadline has been reached.
 //!
 //! The delayed items can be consumed through a channel returned at creation.
@@ -15,7 +15,7 @@
 //!
 //! # Usage
 //!
-//! Elements are inserted into [`DelayQueue`] using the [`elayQueue::insert`] or
+//! Elements are inserted into [`DelayQueue`] using the [`DelayQueue::insert`] or
 //! [`DelayQueue::insert_at`] methods. A deadline is provided with the item and a [`DelayHandle`] is
 //! returned. The delay handle is used to remove the entry.
 //!
@@ -24,7 +24,7 @@
 //!
 //! Modification of the delay fails if the delayed item expired in the meantime. In this case
 //! an [`ErrorAlreadyExpired`] will be returned. If modification succeeds the handle will
-//! be returned back to the caler.
+//! be returned back to the caller.
 //!
 //! # Example
 //!
@@ -40,7 +40,8 @@
 //!     assert!(delay_handle.reset(Duration::from_millis(40)).await.is_ok());
 //!
 //!     let delay_handle = delay_queue.insert(2, Duration::from_millis(10));
-//!     delay_handle.cancel().await;
+//!     assert!(delay_handle.cancel().await.is_ok());
+//!
 //!     let delay_handle = delay_queue.insert(3, Duration::from_millis(30));
 //!
 //!     assert_eq!(rx.receive().await, Some(3));
@@ -136,8 +137,8 @@ impl DelayHandle {
     }
 
     /// Cancels the delay.
-    pub async fn cancel(self) {
-        let _ = self.reset.send(DelayReset::Cancel).await;
+    pub async fn cancel(self) -> Result<(), ErrorAlreadyExpired> {
+        self.reset.send(DelayReset::Cancel).await.map_err(|_| ErrorAlreadyExpired {})
     }
 }
 
@@ -277,7 +278,7 @@ mod tests {
     async fn cancel() {
         let (delay_queue, rx) = delay_queue::<i32>(3);
         let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
-        delay_handle.cancel().await;
+        assert!(delay_handle.cancel().await.is_ok());
         assert!(
             timeout(Duration::from_millis(40), rx.receive())
                 .await

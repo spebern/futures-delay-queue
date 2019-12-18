@@ -2,11 +2,11 @@
 
 <!-- cargo-sync-readme start -->
 
-A queue of delayed elements running backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
+A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
 - [async-std](https://crates.io/crates/async-std) as default, and
 - [tokio](https://crates.io/crates/tokio) with feature "use-tokio"
 
-Once an element is inserted into the [`DelayQueue`], it is yielded once the
+An element is inserted into the [`DelayQueue`] and will be yielded once the
 specified deadline has been reached.
 
 The delayed items can be consumed through a channel returned at creation.
@@ -19,7 +19,7 @@ or a reset the item is yielded through the receiver channel.
 
 # Usage
 
-Elements are inserted into [`DelayQueue`] using the [`elayQueue::insert`] or
+Elements are inserted into [`DelayQueue`] using the [`DelayQueue::insert`] or
 [`DelayQueue::insert_at`] methods. A deadline is provided with the item and a [`DelayHandle`] is
 returned. The delay handle is used to remove the entry.
 
@@ -28,7 +28,7 @@ calling the [`DelayHandle::cancel`] method. Dropping the handle will not cancel 
 
 Modification of the delay fails if the delayed item expired in the meantime. In this case
 an [`ErrorAlreadyExpired`] will be returned. If modification succeeds the handle will
-be returned back to the caler.
+be returned back to the caller.
 
 # Example
 
@@ -44,7 +44,8 @@ async fn main() {
     assert!(delay_handle.reset(Duration::from_millis(40)).await.is_ok());
 
     let delay_handle = delay_queue.insert(2, Duration::from_millis(10));
-    delay_handle.cancel().await;
+    assert!(delay_handle.cancel().await.is_ok());
+
     let delay_handle = delay_queue.insert(3, Duration::from_millis(30));
 
     assert_eq!(rx.receive().await, Some(3));
