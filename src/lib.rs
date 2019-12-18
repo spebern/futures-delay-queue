@@ -97,7 +97,7 @@ enum DelayReset {
 }
 
 /// The error type for delays that are modified after they have already expired in the `DelayQueue`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ErrorAlreadyExpired {}
 
 impl Error for ErrorAlreadyExpired {
