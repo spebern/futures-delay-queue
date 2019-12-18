@@ -1,4 +1,6 @@
-//! A queue of delayed elements running backed by [async-std](https://github.com/async-rs/async-std) and [futures-timer](https://github.com/async-rs/futures-timer).
+//! A queue of delayed elements running backed by [futures-timer](https://github.com/async-rs/futures-timer) that can be used with both
+//! - [async-std](https://crates.io/crates/async-std) as default, and
+//! - [tokio](https://crates.io/crates/tokio) with feature "use-tokio"
 //!
 //! Once an element is inserted into the `DelayQueue`, it is yielded once the
 //! specified deadline has been reached.
@@ -17,8 +19,12 @@
 //! [`insert_at`] methods. A deadline is provided with the item and a [`DelayHandle`] is
 //! returned. The delay handle is used to remove the entry.
 //!
-//! The delays can be configured with the [`reset_at` or the [`reset`] method or canceled by
+//! The delays can be configured with the [`reset_at`] or the [`reset`] method or canceled by
 //! calling the [`cancel`] method. Dropping the handle will not cancel the delay.
+//!
+//! Modification of the delay fails if the delayed item expired in the meantime. In this case
+//! an error (`AlreadyExpiredError`) will be returned. If modification succeeds the handle will
+//! be returned back to the caler.
 //!
 //! # Example
 //!
@@ -31,16 +37,17 @@
 //!     let (delay_queue, rx) = delay_queue::<i32>(3);
 //!
 //!     let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
-//!     delay_handle.reset(Duration::from_millis(40)).await;
+//!     assert!(delay_handle.reset(Duration::from_millis(40)).await.is_ok());
+//!
 //!     let delay_handle = delay_queue.insert(2, Duration::from_millis(10));
 //!     delay_handle.cancel().await;
 //!     let delay_handle = delay_queue.insert(3, Duration::from_millis(30));
 //!
-//!     assert_eq!(rx.recv().await, Some(3));
-//!     assert_eq!(rx.recv().await, Some(1));
+//!     assert_eq!(rx.receive().await, Some(3));
+//!     assert_eq!(rx.receive().await, Some(1));
 //!
 //!     drop(delay_queue);
-//!     assert_eq!(rx.recv().await, None);
+//!     assert_eq!(rx.receive().await, None);
 //! }
 //! ```
 //!
@@ -54,19 +61,21 @@
 #![doc(test(attr(deny(rust_2018_idioms, warnings))))]
 #![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
 
-use async_std::{
-    stream::Stream,
-    sync::{channel, Receiver, Sender},
-    task,
-};
+#[cfg(feature = "use-async-std")]
+use async_std::task;
+use futures_intrusive::channel::shared::{channel, Receiver, Sender};
 use futures_timer::Delay;
 use pin_project_lite::pin_project;
 use std::{
+    error::Error,
+    fmt::{self, Display},
     future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+#[cfg(feature = "use-tokio")]
+use tokio::task;
 
 /// A queue for managing delayed items.
 #[derive(Debug)]
@@ -87,28 +96,48 @@ enum DelayReset {
     Cancel,
 }
 
+/// The error type for delays that are modified after they have already expired in the `DelayQueue`.
+#[derive(Debug, PartialEq)]
+pub struct ErrorAlreadyExpired {}
+
+impl Error for ErrorAlreadyExpired {
+    fn description(&self) -> &str {
+        "delay already expired"
+    }
+}
+
+impl Display for ErrorAlreadyExpired {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Delay already expired")
+    }
+}
+
 impl DelayHandle {
     /// Resets the delay of the corresponding item to `when` and returns a new `DelayHandle` on
     /// success.
-    pub async fn reset_at(&self, when: Instant) {
+    pub async fn reset_at(self, when: Instant) -> Result<Self, ErrorAlreadyExpired> {
         let now = Instant::now();
         let dur = if when <= now {
             Duration::from_nanos(0)
         } else {
             when - now
         };
-        self.reset(dur).await;
+        self.reset(dur).await
     }
 
     /// Resets the delay of the corresponding item to now + `dur` and returns a new `DelayHandle`on
     /// success.
-    pub async fn reset(&self, dur: Duration) {
-        self.reset.send(DelayReset::NewDuration(dur)).await;
+    pub async fn reset(self, dur: Duration) -> Result<Self, ErrorAlreadyExpired> {
+        self.reset
+            .send(DelayReset::NewDuration(dur))
+            .await
+            .map_err(|_| ErrorAlreadyExpired {})?;
+        Ok(self)
     }
 
     /// Cancels the delay.
     pub async fn cancel(self) {
-        self.reset.send(DelayReset::Cancel).await;
+        let _ = self.reset.send(DelayReset::Cancel).await;
     }
 }
 
@@ -129,7 +158,6 @@ pin_project! {
         value: Option<T>,
         #[pin]
         delay: Delay,
-        #[pin]
         reset: Receiver<DelayReset>,
         handle_dropped: bool,
     }
@@ -142,7 +170,10 @@ impl<T> Future for DelayedItem<T> {
         let mut this = self.project();
         if !*this.handle_dropped {
             // check if we got a reset or got cancled
-            if let Poll::Ready(v) = this.reset.poll_next(cx) {
+            // `new_unchecked` is ok because the value is never used again after being dropped.
+            if let Poll::Ready(v) =
+                unsafe { Pin::new_unchecked(&mut this.reset.receive()).poll(cx) }
+            {
                 match v {
                     Some(reset) => match reset {
                         DelayReset::Cancel => return Poll::Ready(None),
@@ -180,7 +211,7 @@ impl<T: 'static + Send> DelayQueue<T> {
     }
 
     fn new_handle_with_future(&self, value: T, dur: Duration) -> DelayHandle {
-        let (reset_tx, reset_rx) = channel(1);
+        let (reset_tx, reset_rx) = channel(0);
         let expired = self.expired.clone();
         let delayed_item = DelayedItem {
             value: Some(value),
@@ -190,7 +221,7 @@ impl<T: 'static + Send> DelayQueue<T> {
         };
         task::spawn(async move {
             if let Some(v) = delayed_item.await {
-                expired.send(v).await;
+                let _ = expired.send(v).await;
             }
         });
         DelayHandle { reset: reset_tx }
@@ -208,11 +239,11 @@ mod tests {
         delay_queue.insert(1, Duration::from_millis(10));
         delay_queue.insert(2, Duration::from_millis(5));
         assert_eq!(
-            timeout(Duration::from_millis(8), rx.recv()).await,
+            timeout(Duration::from_millis(8), rx.receive()).await,
             Ok(Some(2))
         );
         assert_eq!(
-            timeout(Duration::from_millis(7), rx.recv()).await,
+            timeout(Duration::from_millis(7), rx.receive()).await,
             Ok(Some(1))
         );
     }
@@ -221,16 +252,23 @@ mod tests {
     async fn reset() {
         let (delay_queue, rx) = delay_queue::<i32>(3);
         let delay_handle = delay_queue.insert(1, Duration::from_millis(100));
-        delay_handle.reset(Duration::from_millis(20)).await;
+        assert!(delay_handle.reset(Duration::from_millis(20)).await.is_ok());
+
         assert_eq!(
-            timeout(Duration::from_millis(40), rx.recv()).await,
+            timeout(Duration::from_millis(40), rx.receive()).await,
             Ok(Some(1))
         );
 
         let delay_handle = delay_queue.insert(2, Duration::from_millis(100));
-        delay_handle.reset_at(Instant::now() + Duration::from_millis(20)).await;
+        assert!(
+            delay_handle
+                .reset_at(Instant::now() + Duration::from_millis(20))
+                .await
+                .is_ok()
+        );
+
         assert_eq!(
-            timeout(Duration::from_millis(40), rx.recv()).await,
+            timeout(Duration::from_millis(40), rx.receive()).await,
             Ok(Some(2))
         );
     }
@@ -240,7 +278,10 @@ mod tests {
         let (delay_queue, rx) = delay_queue::<i32>(3);
         let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
         delay_handle.cancel().await;
-        assert!(timeout(Duration::from_millis(40), rx.recv()).await.is_err());
+        assert!(
+            timeout(Duration::from_millis(40), rx.receive())
+                .await
+                .is_err()
+        );
     }
 }
-
