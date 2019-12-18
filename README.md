@@ -32,7 +32,7 @@ be returned back to the caler.
 
 # Example
 
-```
+```rust
 use futures_delay_queue::delay_queue;
 use std::time::Duration;
 
