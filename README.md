@@ -1,5 +1,18 @@
 # Asynchronous delay queue
 
+[![Crates.io][crates-badge]][crates-url]
+[![docs.rs docs][docs-badge]][docs-url]
+[![ci][ci-badge]][ci-url]
+
+[crates-badge]: https://img.shields.io/crates/v/futures-delay-queue.svg
+[crates-url]: https://crates.io/crates/futures-delay-queue
+
+[docs-badge]: https://img.shields.io/badge/docs-latest-blue.svg
+[docs-url]: https://docs.rs/futures-delay-queue
+
+[ci-badge]: https://github.com/spebern/futures-delay-queue/workflows/Rust/badge.svg
+[ci-url]: https://github.com/spebern/futures-delay-queue/actions
+
 <!-- cargo-sync-readme start -->
 
 A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
