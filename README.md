@@ -15,33 +15,37 @@
 
 <!-- cargo-sync-readme start -->
 
-A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer) that can be used with both
+A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer)
+that can be used with both:
 - [async-std](https://crates.io/crates/async-std) as default, and
 - [tokio](https://crates.io/crates/tokio) with feature "use-tokio"
 
-An element is inserted into the [`DelayQueue`] and will be yielded once the
-specified deadline has been reached.
+An element is inserted into the [`DelayQueue`] and will be yielded once the specified deadline
+has been reached.
 
 The delayed items can be consumed through a channel returned at creation.
 
 # Implementation
 
-The delays are spawned and a timeout races against a reset channel that can be
-triggered with the [`DelayHandle`]. If the timeout occurs before cancelation
-or a reset the item is yielded through the receiver channel.
+The delays are spawned and a timeout races against a reset channel that can be triggered with
+the [`DelayHandle`]. If the timeout occurs before cancelation or a reset the item is yielded
+through the receiver channel.
 
 # Usage
 
-Elements are inserted into [`DelayQueue`] using the [`DelayQueue::insert`] or
-[`DelayQueue::insert_at`] methods. A deadline is provided with the item and a [`DelayHandle`] is
-returned. The delay handle is used to remove the entry.
+A [`DelayQueue`] and a channel for receiving the expired items is created using the [`delay_queue`]
+function.
 
-The delays can be configured with the [`DelayHandle::reset_at`] or the [`DelayHandle::reset`] method or canceled by
-calling the [`DelayHandle::cancel`] method. Dropping the handle will not cancel the delay.
+Elements are inserted into [`DelayQueue`] using the [`insert`] or [`insert_at`] methods. A
+deadline is provided with the item and a [`DelayHandle`] is returned. The delay handle is used
+to remove the entry.
 
-Modification of the delay fails if the delayed item expired in the meantime. In this case
-an [`ErrorAlreadyExpired`] will be returned. If modification succeeds the handle will
-be returned back to the caller.
+The delays can be configured with the [`reset_at`] or the [`reset`] method or canceled by
+calling the [`cancel`] method. Dropping the handle will not cancel the delay.
+
+Modification of the delay fails if the delayed item expired in the meantime. In this case an
+[`ErrorAlreadyExpired`] will be returned. If modification succeeds the handle will be returned
+back to the caller.
 
 # Example
 
