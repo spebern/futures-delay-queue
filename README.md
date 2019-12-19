@@ -73,9 +73,14 @@ async fn main() {
 }
 ```
 
-[`insert`]: #method.insert
-[`insert_at`]: #method.insert_at
-[`cancel`]: #method.cancel
+[`delay_queue`]: fn.delay_queue.html
+[`DelayQueue`]: struct.DelayQueue.html
+[`insert`]: struct.DelayQueue.html#method.insert
+[`insert_at`]: struct.DelayQueue.html#method.insert_at
 [`DelayHandle`]: struct.DelayHandle.html
+[`cancel`]: struct.DelayHandle.html#method.cancel
+[`reset`]: struct.DelayHandle.html#method.reset
+[`reset_at`]: struct.DelayHandle.html#method.reset_at
+[`ErrorAlreadyExpired`]: struct.ErrorAlreadyExpired.html
 
 <!-- cargo-sync-readme end -->
