@@ -147,7 +147,10 @@ impl DelayHandle {
 
     /// Cancels the delay.
     pub async fn cancel(self) -> Result<(), ErrorAlreadyExpired> {
-        self.reset.send(DelayReset::Cancel).await.map_err(|_| ErrorAlreadyExpired {})
+        self.reset
+            .send(DelayReset::Cancel)
+            .await
+            .map_err(|_| ErrorAlreadyExpired {})
     }
 }
 
@@ -164,8 +167,8 @@ impl DelayHandle {
 /// ```
 /// # async_std::task::block_on(async {
 /// #
-/// use std::time::Duration;
 /// use futures_delay_queue::delay_queue;
+/// use std::time::Duration;
 ///
 /// let (delay_queue, expired_items) = delay_queue(0);
 /// delay_queue.insert(1, Duration::from_millis(10));
