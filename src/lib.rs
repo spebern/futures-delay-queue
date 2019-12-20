@@ -158,10 +158,6 @@ impl DelayHandle {
 ///
 /// This delay queue has a buffer that can hold at most `cap` messages at a time.
 ///
-/// # Panics
-///
-/// If `cap` is zero, this function will panic.
-///
 /// # Example
 ///
 /// ```
