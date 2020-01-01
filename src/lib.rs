@@ -73,7 +73,7 @@
 
 #[cfg(feature = "use-async-std")]
 use async_std::task;
-use futures_intrusive::channel::shared::{channel, Receiver, Sender};
+use futures_intrusive::channel::shared::{channel, Sender};
 use futures_timer::Delay;
 use pin_project_lite::pin_project;
 use std::{
@@ -86,6 +86,8 @@ use std::{
 };
 #[cfg(feature = "use-tokio")]
 use tokio::task;
+
+pub use futures_intrusive::channel::shared::Receiver;
 
 /// A queue for managing delayed items.
 #[derive(Debug, Clone)]
