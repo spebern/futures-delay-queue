@@ -88,7 +88,7 @@ use std::{
 use tokio::task;
 
 /// A queue for managing delayed items.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DelayQueue<T: 'static> {
     // Used to send the expired items.
     expired: Sender<T>,
