@@ -73,7 +73,7 @@
 
 #[cfg(feature = "use-async-std")]
 use async_std::task;
-use futures_intrusive::channel::shared::{channel, unbuffered_channel, Sender};
+use futures_intrusive::channel::shared::{channel, Sender};
 use futures_timer::Delay;
 use pin_project_lite::pin_project;
 use std::{
@@ -182,29 +182,6 @@ impl DelayHandle {
 /// ```
 pub fn delay_queue<T: 'static + Send>(cap: usize) -> (DelayQueue<T>, Receiver<T>) {
     let (tx, rx) = channel(cap);
-    (DelayQueue { expired: tx }, rx)
-}
-
-/// Creates a delay queue and a multi consumer channel with dynamic sizes for receiving expired items.
-///
-/// # Example
-///
-/// ```
-/// # async_std::task::block_on(async {
-/// #
-/// use futures_delay_queue::unbuffered_delay_queue;
-/// use std::time::Duration;
-///
-/// let (delay_queue, expired_items) = unbuffered_delay_queue();
-/// delay_queue.insert(1, Duration::from_millis(10));
-///
-/// // approximately 10ms later
-/// assert_eq!(expired_items.receive().await, Some(1));
-/// #
-/// # })
-/// ```
-pub fn unbuffered_delay_queue<T: 'static + Send>() -> (DelayQueue<T>, Receiver<T>) {
-    let (tx, rx) = unbuffered_channel();
     (DelayQueue { expired: tx }, rx)
 }
 
