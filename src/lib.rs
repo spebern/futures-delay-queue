@@ -158,7 +158,11 @@ impl DelayHandle {
 
 /// Creates a delay queue and a multi consumer channel for receiving expired items.
 ///
-/// This delay queue has a buffer that can hold at most `cap` messages at a time.
+/// The delay queue's underlying channel can buffer up to `cap` items internally.
+/// However, depending upon the underlying channel `cap` might be ignored as there
+/// are different types of ring buffers that can be used. This basically depends
+/// on future-intrusive's generic channel. Therefor `cap` as buffersize is guaranteed,
+/// but the delay queue might allow more items to be added than capacity.
 ///
 /// # Example
 ///
@@ -168,7 +172,7 @@ impl DelayHandle {
 /// use futures_delay_queue::delay_queue;
 /// use std::time::Duration;
 ///
-/// let (delay_queue, expired_items) = delay_queue(0);
+/// let (delay_queue, expired_items) = delay_queue(1);
 /// delay_queue.insert(1, Duration::from_millis(10));
 ///
 /// // approximately 10ms later
