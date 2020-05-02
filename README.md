@@ -55,7 +55,7 @@ use std::time::Duration;
 
 #[async_std::main]
 async fn main() {
-    let (delay_queue, rx) = delay_queue::<i32>(3);
+    let (delay_queue, rx) = delay_queue::<i32>();
 
     let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
     assert!(delay_handle.reset(Duration::from_millis(40)).await.is_ok());

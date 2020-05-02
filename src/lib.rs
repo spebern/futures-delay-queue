@@ -38,7 +38,7 @@
 //!
 //! #[async_std::main]
 //! async fn main() {
-//!     let (delay_queue, rx) = delay_queue::<i32>(3);
+//!     let (delay_queue, rx) = delay_queue::<i32>();
 //!
 //!     let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
 //!     assert!(delay_handle.reset(Duration::from_millis(40)).await.is_ok());
@@ -73,7 +73,10 @@
 
 #[cfg(feature = "use-async-std")]
 use async_std::task;
-use futures_intrusive::channel::shared::{channel, Sender};
+use futures_intrusive::{
+    buffer::{FixedHeapBuf, GrowingHeapBuf, RingBuf},
+    channel::shared::{generic_channel, GenericReceiver},
+};
 use futures_timer::Delay;
 use pin_project_lite::pin_project;
 use std::{
@@ -87,20 +90,20 @@ use std::{
 #[cfg(feature = "use-tokio")]
 use tokio::task;
 
-pub use futures_intrusive::channel::shared::Receiver;
+pub use futures_intrusive::channel::shared::{GenericSender, Receiver};
 
 /// A queue for managing delayed items.
 #[derive(Debug, Clone)]
-pub struct DelayQueue<T: 'static> {
+pub struct DelayQueue<T: 'static, A: RingBuf<Item = T>> {
     // Used to send the expired items.
-    expired: Sender<T>,
+    expired: GenericSender<parking_lot::RawMutex, T, A>,
 }
 
 /// A handle to cancel the corresponding delay of an item in `DelayQueue`.
 #[derive(Debug)]
 pub struct DelayHandle {
     // Used to change the delay.
-    reset: Sender<DelayReset>,
+    reset: GenericSender<parking_lot::RawMutex, DelayReset, FixedHeapBuf<DelayReset>>,
 }
 
 enum DelayReset {
@@ -156,13 +159,7 @@ impl DelayHandle {
     }
 }
 
-/// Creates a delay queue and a multi consumer channel for receiving expired items.
-///
-/// The delay queue's underlying channel can buffer up to `cap` items internally.
-/// However, depending upon the underlying channel `cap` might be ignored as there
-/// are different types of ring buffers that can be used. This basically depends
-/// on future-intrusive's generic channel. Therefor `cap` as buffersize is guaranteed,
-/// but the delay queue might allow more items to be added than capacity.
+/// Creates a dynamically growing delay queue and a multi consumer channel for receiving expired items.
 ///
 /// # Example
 ///
@@ -172,7 +169,7 @@ impl DelayHandle {
 /// use futures_delay_queue::delay_queue;
 /// use std::time::Duration;
 ///
-/// let (delay_queue, expired_items) = delay_queue(1);
+/// let (delay_queue, expired_items) = delay_queue();
 /// delay_queue.insert(1, Duration::from_millis(10));
 ///
 /// // approximately 10ms later
@@ -180,8 +177,8 @@ impl DelayHandle {
 /// #
 /// # })
 /// ```
-pub fn delay_queue<T: 'static + Send>(cap: usize) -> (DelayQueue<T>, Receiver<T>) {
-    let (tx, rx) = channel(cap);
+pub fn delay_queue<T: 'static + Send>() -> (DelayQueue<T, GrowingHeapBuf<T>>, GenericReceiver<parking_lot::RawMutex, T, GrowingHeapBuf<T>>) {
+    let (tx, rx) = generic_channel(0);
     (DelayQueue { expired: tx }, rx)
 }
 
@@ -190,7 +187,7 @@ pin_project! {
         value: Option<T>,
         #[pin]
         delay: Delay,
-        reset: Receiver<DelayReset>,
+        reset: GenericReceiver<parking_lot::RawMutex, DelayReset, FixedHeapBuf<DelayReset>>,
         handle_dropped: bool,
     }
 }
@@ -225,7 +222,11 @@ impl<T> Future for DelayedItem<T> {
     }
 }
 
-impl<T: 'static + Send> DelayQueue<T> {
+impl<T, A> DelayQueue<T, A>
+where
+    T: 'static + Send,
+    A: 'static + RingBuf<Item = T> + Send,
+{
     /// Inserts an item into the delay queue that will be yielded after `dur` has passed.
     pub fn insert(&self, value: T, dur: Duration) -> DelayHandle {
         self.new_handle_with_future(value, dur)
@@ -243,7 +244,7 @@ impl<T: 'static + Send> DelayQueue<T> {
     }
 
     fn new_handle_with_future(&self, value: T, dur: Duration) -> DelayHandle {
-        let (reset_tx, reset_rx) = channel(0);
+        let (reset_tx, reset_rx) = generic_channel::<parking_lot::RawMutex, _, FixedHeapBuf<_>>(0);
         let expired = self.expired.clone();
         let delayed_item = DelayedItem {
             value: Some(value),
@@ -267,7 +268,7 @@ mod tests {
 
     #[async_std::test]
     async fn insert() {
-        let (delay_queue, rx) = delay_queue::<i32>(3);
+        let (delay_queue, rx) = delay_queue::<i32>();
         delay_queue.insert(1, Duration::from_millis(10));
         delay_queue.insert(2, Duration::from_millis(5));
         assert_eq!(
@@ -282,7 +283,7 @@ mod tests {
 
     #[async_std::test]
     async fn reset() {
-        let (delay_queue, rx) = delay_queue::<i32>(3);
+        let (delay_queue, rx) = delay_queue::<i32>();
         let delay_handle = delay_queue.insert(1, Duration::from_millis(100));
         assert!(delay_handle.reset(Duration::from_millis(20)).await.is_ok());
 
@@ -307,7 +308,7 @@ mod tests {
 
     #[async_std::test]
     async fn cancel() {
-        let (delay_queue, rx) = delay_queue::<i32>(3);
+        let (delay_queue, rx) = delay_queue::<i32>();
         let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
         assert!(delay_handle.cancel().await.is_ok());
         assert!(
