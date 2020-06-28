@@ -22,7 +22,7 @@ tokio = { version = "0.2", optional = true }
 futures-timer = "3"
 pin-project-lite = "0.1"
 futures-intrusive = "0.3"
-parking_lot = "0.10"
+parking_lot = "0.11"
 
 [dev-dependencies]
 async-std = { version = "1", features = ["attributes"] }
