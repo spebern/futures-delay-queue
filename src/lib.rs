@@ -75,7 +75,7 @@
 use async_std::task;
 use futures_intrusive::{
     buffer::{FixedHeapBuf, GrowingHeapBuf, RingBuf},
-    channel::shared::{generic_channel, GenericReceiver},
+    channel::shared::{generic_channel, ChannelReceiveFuture, GenericReceiver},
 };
 use futures_timer::Delay;
 use pin_project_lite::pin_project;
@@ -185,9 +185,9 @@ pub fn delay_queue<T: 'static + Send>() -> (DelayQueue<T, GrowingHeapBuf<T>>, Ge
 pin_project! {
     struct DelayedItem<T> {
         value: Option<T>,
-        #[pin]
         delay: Delay,
-        reset: GenericReceiver<parking_lot::RawMutex, DelayReset, FixedHeapBuf<DelayReset>>,
+        reset_rx: GenericReceiver<parking_lot::RawMutex, DelayReset, FixedHeapBuf<DelayReset>>,
+        reset: ChannelReceiveFuture<parking_lot::RawMutex, DelayReset>,
         handle_dropped: bool,
     }
 }
@@ -195,28 +195,36 @@ pin_project! {
 impl<T> Future for DelayedItem<T> {
     type Output = Option<T>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        if !*this.handle_dropped {
-            // check if we got a reset or got cancled
-            // `new_unchecked` is ok because the value is never used again after being dropped.
-            if let Poll::Ready(v) =
-                unsafe { Pin::new_unchecked(&mut this.reset.receive()).poll(cx) }
-            {
-                match v {
-                    Some(reset) => match reset {
-                        DelayReset::Cancel => return Poll::Ready(None),
-                        DelayReset::NewDuration(dur) => *this.delay = Delay::new(dur),
-                    },
-                    // handle got dropped, from now on we wait until the item expires
-                    None => *this.handle_dropped = true,
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if !self.handle_dropped {
+            // Make sure the reset future is polled at least once to be awaken on new messages.
+            loop {
+                // check if we got a reset or got cancled
+                // `new_unchecked` is ok because the value is never used again after being dropped.
+                if let Poll::Ready(v) = unsafe { Pin::new_unchecked(&mut self.reset).poll(cx) } {
+                    match v {
+                        Some(reset) => match reset {
+                            DelayReset::Cancel => return Poll::Ready(None),
+                            DelayReset::NewDuration(dur) => self.delay = Delay::new(dur),
+                        },
+                        // handle got dropped, from now on we wait until the item expires
+                        None => {
+                            self.handle_dropped = true;
+                            // Channel is closed.
+                            break;
+                        }
+                    }
+                    // Future is consumed, ask for a new one and poll it (loop).
+                    self.reset = self.reset_rx.receive();
+                } else {
+                    break;
                 }
             }
         }
 
         // expired?
-        match this.delay.poll(cx) {
-            Poll::Ready(_) => Poll::Ready(this.value.take()),
+        match Pin::new(&mut self.delay).poll(cx) {
+            Poll::Ready(_) => Poll::Ready(self.value.take()),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -246,10 +254,12 @@ where
     fn new_handle_with_future(&self, value: T, dur: Duration) -> DelayHandle {
         let (reset_tx, reset_rx) = generic_channel::<parking_lot::RawMutex, _, FixedHeapBuf<_>>(0);
         let expired = self.expired.clone();
+        let reset = reset_rx.receive();
         let delayed_item = DelayedItem {
             value: Some(value),
             delay: Delay::new(dur),
-            reset: reset_rx,
+            reset_rx,
+            reset,
             handle_dropped: false,
         };
         task::spawn(async move {
@@ -309,10 +319,14 @@ mod tests {
     #[async_std::test]
     async fn cancel() {
         let (delay_queue, rx) = delay_queue::<i32>();
-        let delay_handle = delay_queue.insert(1, Duration::from_millis(20));
+        let delay_handle = delay_queue.insert(1, Duration::from_millis(200));
+        // Make sure the future is polled at least once
+        task::sleep(Duration::from_millis(50)).await;
+        let instant = Instant::now();
         assert!(delay_handle.cancel().await.is_ok());
+        assert!(instant.elapsed() < Duration::from_millis(10));
         assert!(
-            timeout(Duration::from_millis(40), rx.receive())
+            timeout(Duration::from_millis(500), rx.receive())
                 .await
                 .is_err()
         );
