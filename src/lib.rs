@@ -177,7 +177,10 @@ impl DelayHandle {
 /// #
 /// # })
 /// ```
-pub fn delay_queue<T: 'static + Send>() -> (DelayQueue<T, GrowingHeapBuf<T>>, GenericReceiver<parking_lot::RawMutex, T, GrowingHeapBuf<T>>) {
+pub fn delay_queue<T: 'static + Send>() -> (
+    DelayQueue<T, GrowingHeapBuf<T>>,
+    GenericReceiver<parking_lot::RawMutex, T, GrowingHeapBuf<T>>,
+) {
     let (tx, rx) = generic_channel(0);
     (DelayQueue { expired: tx }, rx)
 }
@@ -199,7 +202,7 @@ impl<T> Future for DelayedItem<T> {
         if !self.handle_dropped {
             // Make sure the reset future is polled at least once to be awaken on new messages.
             loop {
-                // check if we got a reset or got cancled
+                // Check if we got a reset or got canceled
                 // `new_unchecked` is ok because the value is never used again after being dropped.
                 if let Poll::Ready(v) = unsafe { Pin::new_unchecked(&mut self.reset).poll(cx) } {
                     match v {
@@ -303,12 +306,10 @@ mod tests {
         );
 
         let delay_handle = delay_queue.insert(2, Duration::from_millis(100));
-        assert!(
-            delay_handle
-                .reset_at(Instant::now() + Duration::from_millis(20))
-                .await
-                .is_ok()
-        );
+        assert!(delay_handle
+            .reset_at(Instant::now() + Duration::from_millis(20))
+            .await
+            .is_ok());
 
         assert_eq!(
             timeout(Duration::from_millis(40), rx.receive()).await,
@@ -325,10 +326,8 @@ mod tests {
         let instant = Instant::now();
         assert!(delay_handle.cancel().await.is_ok());
         assert!(instant.elapsed() < Duration::from_millis(10));
-        assert!(
-            timeout(Duration::from_millis(500), rx.receive())
-                .await
-                .is_err()
-        );
+        assert!(timeout(Duration::from_millis(500), rx.receive())
+            .await
+            .is_err());
     }
 }
