@@ -2,7 +2,7 @@
 name = "futures-delay-queue"
 version = "0.5.2"
 authors = ["spebern sp33cht@gmail.com"]
-edition = "2018"
+edition = "2021"
 license = "Apache-2.0/MIT"
 repository = "https://github.com/spebern/futures-delay-queue"
 documentation = "https://docs.rs/futures-delay-queue"
@@ -12,13 +12,11 @@ categories = ["asynchronous", "concurrency", "network-programming"]
 readme = "README.md"
 
 [features]
-use-tokio = ["tokio"]
-use-async-std = ["async-std"]
-default = ["use-async-std"]
+default = ["async-std"]
 
 [dependencies]
 async-std = { version = "1", optional = true }
-tokio = { version = "1.6", optional = true }
+tokio = { version = "1.35", features = ["rt"], optional = true }
 futures-timer = "3"
 pin-project-lite = "0.2"
 futures-intrusive = "0.5"
