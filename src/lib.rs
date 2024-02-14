@@ -1,36 +1,41 @@
-//! A queue of delayed elements backed by [futures-timer](https://crates.io/crates/futures-timer)
+//! A queue of delayed elements backed by [`futures-timer`](https://crates.io/crates/futures-timer)
 //! that can be used with both:
-//! - [async-std](https://crates.io/crates/async-std) as default, and
-//! - [tokio](https://crates.io/crates/tokio) with feature "use-tokio"
 //!
-//! An element is inserted into the [`DelayQueue`] and will be yielded once the specified deadline
-//! has been reached.
+//! - [`async-std`](https://crates.io/crates/async-std) as default, and
+//! - [`tokio`](https://crates.io/crates/tokio) with feature `tokio` (and
+//!   *disabled* default features)
+//!
+//! An element is inserted into the [`DelayQueue`] and will be yielded once the
+//! specified deadline has been reached.
 //!
 //! The delayed items can be consumed through a channel returned at creation.
 //!
-//! # Implementation
+//! ## Implementation
 //!
-//! The delays are spawned and a timeout races against a reset channel that can be triggered with
-//! the [`DelayHandle`]. If the timeout occurs before cancelation or a reset the item is yielded
-//! through the receiver channel.
+//! The delays are spawned and a timeout races against a reset channel that can
+//! be triggered with the [`DelayHandle`]. If the timeout occurs before
+//! cancelation or a reset the item is yielded through the receiver channel.
 //!
-//! # Usage
+//! ## Usage
 //!
-//! A [`DelayQueue`] and a channel for receiving the expired items is created using the [`delay_queue`]
-//! function.
+//! A [`DelayQueue`] and a channel for receiving the expired items is created
+//! using the [`delay_queue`] function.
 //!
-//! Elements are inserted into [`DelayQueue`] using the [`insert`] or [`insert_at`] methods. A
-//! deadline is provided with the item and a [`DelayHandle`] is returned. The delay handle is used
-//! to remove the entry.
+//! Elements are inserted into [`DelayQueue`] using the
+//! [`insert()`](DelayQueue::insert) or [`insert_at()`](DelayQueue::insert_at)
+//! methods. A deadline is provided with the item and a [`DelayHandle`] is
+//! returned. The delay handle is used to remove the entry.
 //!
-//! The delays can be configured with the [`reset_at`] or the [`reset`] method or canceled by
-//! calling the [`cancel`] method. Dropping the handle will not cancel the delay.
+//! The delays can be configured with the [`reset_at()`](DelayHandle::reset_at)
+//! or the [`reset()`](DelayHandle::reset) method or canceled by calling the
+//! [`cancel()`](DelayHandle::cancel) method. Dropping the handle will not
+//! cancel the delay.
 //!
-//! Modification of the delay fails if the delayed item expired in the meantime. In this case an
-//! [`ErrorAlreadyExpired`] will be returned. If modification succeeds the handle will be returned
-//! back to the caller.
+//! Modification of the delay fails if the delayed item expired in the meantime.
+//! In this case an [`ErrorAlreadyExpired`] will be returned. If modification
+//! succeeds the handle will be returned back to the caller.
 //!
-//! # Example
+//! ## Example
 //!
 //! ```rust
 //! use futures_delay_queue::delay_queue;
@@ -55,23 +60,13 @@
 //!     assert_eq!(rx.receive().await, None);
 //! }
 //! ```
-//!
-//! [`delay_queue`]: fn.delay_queue.html
-//! [`DelayQueue`]: struct.DelayQueue.html
-//! [`insert`]: struct.DelayQueue.html#method.insert
-//! [`insert_at`]: struct.DelayQueue.html#method.insert_at
-//! [`DelayHandle`]: struct.DelayHandle.html
-//! [`cancel`]: struct.DelayHandle.html#method.cancel
-//! [`reset`]: struct.DelayHandle.html#method.reset
-//! [`reset_at`]: struct.DelayHandle.html#method.reset_at
-//! [`ErrorAlreadyExpired`]: struct.ErrorAlreadyExpired.html
 
 #![cfg_attr(feature = "docs", feature(doc_cfg))]
-#![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
-#![doc(test(attr(deny(rust_2018_idioms, warnings))))]
+#![warn(missing_docs, missing_debug_implementations)]
+#![doc(test(attr(deny(warnings))))]
 #![doc(test(attr(allow(unused_extern_crates, unused_variables))))]
 
-#[cfg(feature = "use-async-std")]
+#[cfg(feature = "async-std")]
 use async_std::task;
 use futures_intrusive::{
     buffer::{FixedHeapBuf, GrowingHeapBuf, RingBuf},
@@ -87,7 +82,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-#[cfg(feature = "use-tokio")]
+#[cfg(feature = "tokio")]
 use tokio::task;
 
 pub use futures_intrusive::channel::shared::{GenericSender, Receiver};
@@ -111,7 +106,8 @@ enum DelayReset {
     Cancel,
 }
 
-/// The error type for delays that are modified after they have already expired in the `DelayQueue`.
+/// The error type for delays that are modified after they have already expired
+/// in the `DelayQueue`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ErrorAlreadyExpired {}
 
@@ -128,8 +124,8 @@ impl Display for ErrorAlreadyExpired {
 }
 
 impl DelayHandle {
-    /// Resets the delay of the corresponding item to `when` and returns a new `DelayHandle` on
-    /// success.
+    /// Resets the delay of the corresponding item to `when` and returns a new
+    /// `DelayHandle` on success.
     pub async fn reset_at(self, when: Instant) -> Result<Self, ErrorAlreadyExpired> {
         let now = Instant::now();
         let dur = if when <= now {
@@ -140,8 +136,8 @@ impl DelayHandle {
         self.reset(dur).await
     }
 
-    /// Resets the delay of the corresponding item to now + `dur` and returns a new `DelayHandle`on
-    /// success.
+    /// Resets the delay of the corresponding item to now + `dur` and returns a
+    /// new `DelayHandle`on success.
     pub async fn reset(self, dur: Duration) -> Result<Self, ErrorAlreadyExpired> {
         self.reset
             .send(DelayReset::NewDuration(dur))
@@ -159,7 +155,8 @@ impl DelayHandle {
     }
 }
 
-/// Creates a dynamically growing delay queue and a multi consumer channel for receiving expired items.
+/// Creates a dynamically growing delay queue and a multi consumer channel for
+/// receiving expired items.
 ///
 /// # Example
 ///
@@ -200,28 +197,26 @@ impl<T> Future for DelayedItem<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if !self.handle_dropped {
-            // Make sure the reset future is polled at least once to be awaken on new messages.
-            loop {
-                // Check if we got a reset or got canceled
-                // `new_unchecked` is ok because the value is never used again after being dropped.
-                if let Poll::Ready(v) = unsafe { Pin::new_unchecked(&mut self.reset).poll(cx) } {
-                    match v {
-                        Some(reset) => match reset {
-                            DelayReset::Cancel => return Poll::Ready(None),
-                            DelayReset::NewDuration(dur) => self.delay = Delay::new(dur),
-                        },
-                        // handle got dropped, from now on we wait until the item expires
-                        None => {
-                            self.handle_dropped = true;
-                            // Channel is closed.
-                            break;
-                        }
+            // Make sure the reset future is polled at least once to be awaken on new
+            // messages.
+            // Check if we got a reset or got canceled
+            // `new_unchecked` is ok because the value is never used again after being
+            // dropped.
+            while let Poll::Ready(v) = unsafe { Pin::new_unchecked(&mut self.reset).poll(cx) } {
+                match v {
+                    Some(reset) => match reset {
+                        DelayReset::Cancel => return Poll::Ready(None),
+                        DelayReset::NewDuration(dur) => self.delay = Delay::new(dur),
+                    },
+                    // handle got dropped, from now on we wait until the item expires
+                    None => {
+                        self.handle_dropped = true;
+                        // Channel is closed.
+                        break;
                     }
-                    // Future is consumed, ask for a new one and poll it (loop).
-                    self.reset = self.reset_rx.receive();
-                } else {
-                    break;
                 }
+                // Future is consumed, ask for a new one and poll it (loop).
+                self.reset = self.reset_rx.receive();
             }
         }
 
@@ -238,7 +233,8 @@ where
     T: 'static + Send,
     A: 'static + RingBuf<Item = T> + Send,
 {
-    /// Inserts an item into the delay queue that will be yielded after `dur` has passed.
+    /// Inserts an item into the delay queue that will be yielded after `dur`
+    /// has passed.
     pub fn insert(&self, value: T, dur: Duration) -> DelayHandle {
         self.new_handle_with_future(value, dur)
     }
